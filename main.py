@@ -33,75 +33,43 @@ from langchain.document_loaders import PyPDFLoader  # Add this import at the top
 
 class ProjectManager:
     def __init__(self):
-        self.base_path = "./command_center"
-        self.projects_file = os.path.join(self.base_path, "projects.json")
+        self.base_path = "./projects"
+        self.projects_file = "projects.json"
         
         # Create base directories
         os.makedirs(self.base_path, exist_ok=True)
-        os.makedirs(os.path.join(self.base_path, "storage"), exist_ok=True)
-        os.makedirs(os.path.join(self.base_path, "documents"), exist_ok=True)
         
-        # Initialize with new structure including default chat for each project
-        print("Initializing projects.json with default chats")
-        default_chat_id = f"chat_{int(time.time())}"  # Use timestamp for default chat ID
-        default_projects = {
-            "default": {
-                "chats": {
-                    default_chat_id: {
-                        "id": default_chat_id,
-                        "name": "New Chat",
-                        "messages": []
-                    }
-                },
-                "linked_projects": [],
-                "documents": []
-            },
-            "portloom": {
-                "chats": {
-                    default_chat_id: {
-                        "id": default_chat_id,
-                        "name": "New Chat",
-                        "messages": []
-                    }
-                },
-                "linked_projects": [],
-                "documents": []
-            },
-            "webarv": {
-                "chats": {
-                    default_chat_id: {
-                        "id": default_chat_id,
-                        "name": "New Chat",
-                        "messages": []
-                    }
-                },
-                "linked_projects": [],
-                "documents": []
-            },
-            "new project": {
-                "chats": {
-                    default_chat_id: {
-                        "id": default_chat_id,
-                        "name": "New Chat",
-                        "messages": []
-                    }
-                },
-                "linked_projects": [],
-                "documents": []
+         # Initialize projects.json if it doesn't exist
+        if not os.path.exists(self.projects_file):
+            print("Initializing projects.json with default structure")
+            default_chat_id = f"chat_{int(time.time())}"
+            default_projects = {
+                "default": {
+                    "chats": {
+                        default_chat_id: {
+                            "id": default_chat_id,
+                            "name": "New Chat",
+                            "messages": []
+                        }
+                    },
+                    "linked_projects": [],
+                    "documents": []
+                }
             }
-        }
-        
-        with open(self.projects_file, 'w') as f:
-            json.dump(default_projects, f, indent=2)
+            
+            with open(self.projects_file, 'w') as f:
+                json.dump(default_projects, f, indent=2)
         
         # Initialize embeddings and LLM
         self.embeddings = OllamaEmbeddings(model="custom-llama")
         self.llm = OllamaLLM(model="custom-llama")
 
+
     def get_project_path(self, project_name):
         return {
-            'storage': os.path.join(self.base_path, "storage", project_name),
-            'documents': os.path.join(self.base_path, "documents", project_name)
+            'storage': os.path.join(self.base_path, project_name, "storage"),
+            'documents': os.path.join(self.base_path, project_name, "documents"),
+            'chats': os.path.join(self.base_path, project_name, "chats")
         }
 
     def create_project(self, project_name):
@@ -111,7 +79,7 @@ class ProjectManager:
         if project_name in projects:
             return {"status": "Project already exists"}
         
-        # Create new project with a fresh chat
+        # Create new project structure
         default_chat_id = f"chat_{int(time.time())}"
         projects[project_name] = {
             "chats": {
@@ -124,6 +92,12 @@ class ProjectManager:
             "linked_projects": [],
             "documents": []
         }
+        
+        # Create project directories
+        paths = self.get_project_path(project_name)
+        os.makedirs(paths['storage'], exist_ok=True)
+        os.makedirs(paths['documents'], exist_ok=True)
+        os.makedirs(paths['chats'], exist_ok=True)
         
         with open(self.projects_file, 'w') as f:
             json.dump(projects, f, indent=2)
@@ -153,10 +127,13 @@ class ProjectManager:
             print(f"Error getting chat history: {str(e)}")  # Debug log
             return []
 
-    def add_document(self, project_name, filename, content):
-        # Ensure project exists
+    def add_document(self, project_name: str, filename: str, content: str):
         paths = self.get_project_path(project_name)
         file_path = os.path.join(paths['documents'], filename)
+        
+        # Create directories if they don't exist
+        os.makedirs(paths['documents'], exist_ok=True)
+        os.makedirs(paths['storage'], exist_ok=True)
         
         # Write content to file
         with open(file_path, 'w') as f:
@@ -168,10 +145,39 @@ class ProjectManager:
             embedding_function=self.embeddings
         )
         
-        loader = TextLoader(file_path)
-        docs = loader.load()
-        splits = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(docs)
-        db.add_documents(splits)
+        # Split text into chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            length_function=len,
+            separators=["\n\n", "\n", " ", ""]
+        )
+        chunks = text_splitter.split_text(content)
+        
+        # Add chunks to vector store
+        db.add_texts(
+            texts=chunks,
+            metadatas=[{
+                "source": filename,
+                "project": project_name,
+                "chunk": i
+            } for i in range(len(chunks))]
+        )
+        
+        # Update projects.json
+        with open(self.projects_file, 'r') as f:
+            projects = json.load(f)
+            
+        if 'documents' not in projects[project_name]:
+            projects[project_name]['documents'] = []
+            
+        projects[project_name]['documents'].append({
+            'filename': filename,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        with open(self.projects_file, 'w') as f:
+            json.dump(projects, f, indent=2)
         
         return {"status": "Document added successfully"}
 

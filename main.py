@@ -30,6 +30,7 @@ from langchain.schema import Document
 from langchain.llms import Ollama
 import aiohttp
 from langchain.document_loaders import PyPDFLoader  # Add this import at the top
+from notes import notes_app
 
 class ProjectManager:
     def __init__(self):
@@ -422,6 +423,7 @@ class DocumentRequest(BaseModel):
 
 # FastAPI Application
 app = FastAPI()
+app.mount("/notes-api", notes_app)  # mount notes app under /notes-api prefix
 
 # Make CORS more permissive for development
 origins = [

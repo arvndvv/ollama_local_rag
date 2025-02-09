@@ -1105,7 +1105,7 @@ const CommandCenter = () => {
   };
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-neutral-900">
+    <div className="h-full w-screen flex overflow-hidden bg-neutral-900">
       <GradientBackground />
       
       {/* Link Projects Modal */}
